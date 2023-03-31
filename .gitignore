@@ -1,0 +1,6 @@
+password.txt
+*.xls
+dist
+build
+*.spec
+*.zip
