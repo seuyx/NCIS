@@ -10,6 +10,7 @@ from contextlib import redirect_stdout
 import os
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException
 import random
 from datetime import datetime, timedelta
 
@@ -31,6 +32,7 @@ class DiseaseType(Enum):
     THYROID_MALIGNANT = 2
     THYROID_BENIGN_RETROSTERNAL = 3
     BREAST_MAGLINANT = 4
+    BREAST_BENIGN = 5
 
 def execute():
     xls_cnt = 0
@@ -135,6 +137,10 @@ def execute():
             kind = DiseaseType.BREAST_MAGLINANT
             driver.find_element(By.XPATH, '//li[contains(text(),"肿瘤(手术治疗)")]').click()
             driver.find_elements(By.XPATH, '//div[contains(text(), "乳腺癌（手术治疗）")]/parent::div/div')[1].click()
+        elif "乳腺良性" in disease or "乳腺腺病" in disease or "乳房良性" in disease:
+            kind = DiseaseType.BREAST_BENIGN
+            driver.find_element(By.XPATH, '//li[contains(text(),"其他疾病/手术")]').click()
+            driver.find_elements(By.XPATH, '//div[contains(text(), "围手术期预防感染")]/parent::div/div')[1].click()
         else:
             print("*** 暂不支持自动录入的疾病类型：%s" % disease)
             continue
@@ -174,12 +180,18 @@ def execute():
             patient_id_number_input.send_keys(row[8])
 
             # 主要诊断ICD-10四位亚目编码与名称
-            primary_diagnosis_index_4_select = driver.find_element(By.ID, "create_CM_7")
-            primary_diagnosis_index_4_select.send_keys(row[11].split(".")[0])
+            try:
+                primary_diagnosis_index_4_select = driver.find_element(By.ID, "create_CM_7")
+                primary_diagnosis_index_4_select.send_keys(row[11].split(".")[0])
+            except NoSuchElementException:
+                pass
 
             # 主要诊断ICD-10六位临床扩展编码与名称
-            primary_diagnosis_index_6_select = driver.find_element(By.ID, "create_CM_8")
-            primary_diagnosis_index_6_select.send_keys(row[11])
+            try:
+                primary_diagnosis_index_6_select = driver.find_element(By.ID, "create_CM_8")
+                primary_diagnosis_index_6_select.send_keys(row[11])
+            except NoSuchElementException:
+                pass
 
             # 主要手术操作栏中提取ICD-9-CM-3四位亚目编码与名称
             primary_surgery_index_4_select = driver.find_element(By.ID, "create_CM_9")
@@ -192,6 +204,8 @@ def execute():
                     primary_surgery_index_4 = "06.5"
                 case DiseaseType.BREAST_MAGLINANT:
                     primary_surgery_index_4 = "85.20"
+                case DiseaseType.BREAST_BENIGN:
+                    primary_surgery_index_4 = "乳房组织切除术"
                 case _:
                     print("*** 未知疾病种类")
             primary_surgery_index_4_select.send_keys(primary_surgery_index_4)
@@ -207,6 +221,8 @@ def execute():
                     primary_surgery_index_6 = "06.5000"
                 case DiseaseType.BREAST_MAGLINANT:
                     primary_surgery_index_6 = "85.2000"
+                case DiseaseType.BREAST_BENIGN:
+                    primary_surgery_index_6 = "85.2100x004"
                 case _:
                     print("*** 未知疾病种类")
             primary_surgery_index_6_select.send_keys(primary_surgery_index_6)
@@ -252,22 +268,37 @@ def execute():
                 """
             driver.execute_script(js, "create_CM_16")
             admission_date_input = driver.find_element(By.ID, "create_CM_16")
-            admission_date_obj = datetime.strptime(row[13], "%Y%m%d%H:%M:%S")
+            if (isinstance(row[13], str)):
+                admission_date_obj = datetime.strptime(row[13], "%Y%m%d%H:%M:%S")
+            else:
+                admission_date_obj = xlrd.xldate_as_datetime(row[13], 0)
+                delta = timedelta(hours=random.randint(8,9), minutes=random.randint(1,29))
+                admission_date_obj += delta
             admission_date_input.send_keys(admission_date_obj.strftime('%Y-%m-%d %H:%M'))
 
             # 出院日期时间
             driver.execute_script(js, "create_CM_17")
             discharge_date_input = driver.find_element(By.ID, "create_CM_17")
-            discharge_date_obj = datetime.strptime(row[14], "%Y%m%d%H:%M:%S")
+            if (isinstance(row[14], str)):
+                discharge_date_obj = datetime.strptime(row[14], "%Y%m%d%H:%M:%S")
+            else:
+                discharge_date_obj = xlrd.xldate_as_datetime(row[14], 0)
+                delta = timedelta(hours=random.randint(15,17), minutes=random.randint(1,59))
+                discharge_date_obj += delta
             discharge_date_input.send_keys(discharge_date_obj.strftime('%Y-%m-%d %H:%M'))
 
             # 手术开始时间
             driver.execute_script(js, "create_CM_24")
             surgery_begin_time_input = driver.find_element(By.ID, "create_CM_24")
             surgery_begin_time_obj = admission_date_obj.replace(hour = 0, minute = 0, second = 0)
-            delta_day = random.randint(1,2)
-            delta_hour = random.randint(9, 14)
-            delta_minute = random.randint(0, 59)
+            if (row[13] == row[14]): #日间手术
+                delta_day = 0
+                delta_hour = random.randint(10, 13)
+                delta_minute = random.randint(0, 59)
+            else:
+                delta_day = random.randint(1,2)
+                delta_hour = random.randint(9, 17)
+                delta_minute = random.randint(0, 59)
             delta = timedelta(days = delta_day, hours = delta_hour, minutes = delta_minute)
             surgery_begin_time_obj += delta
             surgery_begin_time_input.send_keys(surgery_begin_time_obj.strftime('%Y-%m-%d %H:%M'))
@@ -276,9 +307,12 @@ def execute():
             driver.execute_script(js, "create_CM_25")
             surgery_end_time_input = driver.find_element(By.ID, "create_CM_25")
             delta_hour = 1
+            delta_minute = random.randint(15, 50)
             if kind == DiseaseType.BREAST_MAGLINANT:
                 delta_hour = 2
-            delta_minute = random.randint(15, 50)
+            elif kind == DiseaseType.BREAST_BENIGN:
+                delta_hour = 0
+                delta_minute = random.randint(30, 45)
             delta = timedelta(hours = delta_hour, minutes = delta_minute)
             surgery_end_time_obj = surgery_begin_time_obj + delta
             surgery_end_time_input.send_keys(surgery_end_time_obj.strftime('%Y-%m-%d %H:%M'))
@@ -456,6 +490,8 @@ def execute():
             driver.find_element(By.XPATH, "//select[@id='create_CM_75']").send_keys("甲级愈合")
 
             match kind:
+                case DiseaseType.BREAST_BENIGN:
+                    driver.find_element(By.ID, "create_PIP_230").send_keys("日间手术")
                 case DiseaseType.BREAST_MAGLINANT:
                     # 是否为T1-2,N0M0乳腺癌
                     driver.find_elements(By.XPATH, "//input[@id='create_26']/parent::div/span")[2].click()
