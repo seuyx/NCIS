@@ -4,3 +4,6 @@ dist
 build
 *.spec
 *.zip
+img
+.DS_Store
+*.bak
